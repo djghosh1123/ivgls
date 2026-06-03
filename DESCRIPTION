@@ -1,0 +1,27 @@
+Package: ivgls
+Type: Package
+Title: Network-Aware IV Regression with Graph-Fused Lasso
+Version: 0.1.0
+Authors@R: c(
+    person("Dhrubajyoti", "Ghosh", email = "dghosh3@kennesaw.edu",
+           role = c("aut", "cre"), comment = c(ORCID = "0000-0002-3360-3786")),
+    person("Samhita", "Pal", email = "samhita.pal@vumc.org",
+           role = "aut", comment = c(ORCID = "0009-0001-4930-916X")))
+Description: Implements three instrumental variable (IV) estimators for
+    causal variable selection when exposures have network structure.
+    IV-LASSO applies a standard two-stage LASSO without graph information.
+    IVGL incorporates a graph Laplacian penalty in the second stage to
+    encourage similar effects among connected nodes. IVGL-S further
+    corrects for partially invalid instruments using an alternating
+    sisVIVE-style update. Utility functions for graph construction,
+    data simulation, and performance evaluation are also provided.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports: glmnet, glmgraph, MASS, igraph
+Suggests: knitr, rmarkdown, testthat (>= 3.0.0), ggplot2
+VignetteBuilder: knitr
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Config/roxygen2/version: 8.0.0
+Remotes: cran/glmgraph
+Config/testthat/edition: 3

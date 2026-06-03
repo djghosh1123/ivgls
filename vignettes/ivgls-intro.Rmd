@@ -1,0 +1,99 @@
+---
+title: "Getting Started with ivgls"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with ivgls}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+set.seed(42)
+```
+
+## Overview
+
+The **ivgls** package implements three instrumental variable (IV) estimators
+for causal variable selection when exposures have network structure:
+
+| Estimator  | Graph penalty | Invalid-IV correction |
+|------------|:------------:|:---------------------:|
+| `iv_lasso` | No           | No                    |
+| `ivgl`     | Yes          | No                    |
+| `ivgl_s`   | Yes          | Yes                   |
+
+## Installation
+
+```{r, eval=FALSE}
+# glmgraph must be installed first (not on CRAN)
+devtools::install_github("cran/glmgraph")
+
+# then install ivgls
+install.packages("ivgls")
+```
+
+## Quick Start
+
+### 1. Build a graph and Laplacian
+
+```{r}
+library(ivgls)
+
+A <- make_graph(p = 20, type = "chain")
+L <- get_laplacian(A)
+```
+
+### 2. Simulate data
+
+```{r}
+bobj <- generate_beta(A, s2 = 4, signal = 2, pattern = "smooth")
+dat  <- generate_data(n = 120, p = 20, q = 60,
+                      s_alpha = 5, alpha_strength = 3,
+                      beta_true = bobj$beta_true)
+```
+
+### 3. Fit the estimators
+
+```{r, eval=FALSE}
+beta_ivl  <- iv_lasso(dat$Y, dat$X, dat$Z)
+beta_ivgl <- ivgl(dat$Y, dat$X, dat$Z, L)
+fit_s     <- ivgl_s(dat$Y, dat$X, dat$Z, L, max_iter = 10)
+```
+
+### 4. Evaluate recovery
+
+```{r, eval=FALSE}
+get_mcc(bobj$active_set, which(abs(beta_ivl)  > 1e-4), p = 20)
+get_mcc(bobj$active_set, which(abs(beta_ivgl) > 1e-4), p = 20)
+get_mcc(bobj$active_set, which(abs(fit_s$beta)> 1e-4), p = 20)
+```
+
+## Running a Simulation Study
+
+```{r, eval=FALSE}
+res <- run_simulation(
+  B              = 50,
+  n              = 100,
+  p              = 20,
+  q              = 60,
+  graph_type     = "chain",
+  signal_pattern = "smooth",
+  s2             = 4,
+  signal         = 2,
+  s_alpha        = 5,
+  alpha_strength = 3
+)
+
+aggregate(cbind(MCC, MSE) ~ Method, data = res, FUN = mean)
+```
+
+## Invalid Instrument Detection
+
+When instruments violate the exclusion restriction, `ivgl_s()` identifies
+them via the `alpha` component — non-zero entries are invalid instruments.
+
+```{r, eval=FALSE}
+fit <- ivgl_s(dat$Y, dat$X, dat$Z, L)
+which(abs(fit$alpha) > 1e-4)  # detected invalid instruments
+```
