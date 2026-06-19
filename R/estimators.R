@@ -29,6 +29,13 @@ iv_lasso <- function(Y, X, Z) {
 #' @return Numeric vector of length p of estimated causal effects.
 #' @export
 ivgl <- function(Y, X, Z, L) {
+  if (!requireNamespace("glmgraph", quietly = TRUE)) {
+    stop(
+      "Package 'glmgraph' is required for this function.\n",
+      "Install it with: devtools::install_github(\"cran/glmgraph\")",
+      call. = FALSE
+    )
+  }
   n <- nrow(X)
   p <- ncol(X)
 
@@ -59,6 +66,13 @@ ivgl <- function(Y, X, Z, L) {
 #'   \code{alpha} (length q direct IV-outcome effects).
 #' @export
 ivgl_s <- function(Y, X, Z, L, max_iter = 20, verbose = FALSE) {
+  if (!requireNamespace("glmgraph", quietly = TRUE)) {
+    stop(
+      "Package 'glmgraph' is required for this function.\n",
+      "Install it with: devtools::install_github(\"cran/glmgraph\")",
+      call. = FALSE
+    )
+  }
   p     <- ncol(X)
   q     <- ncol(Z)
   beta  <- rep(0, p)

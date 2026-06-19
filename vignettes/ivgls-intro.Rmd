@@ -14,86 +14,205 @@ set.seed(42)
 
 ## Overview
 
-The **ivgls** package implements three instrumental variable (IV) estimators
-for causal variable selection when exposures have network structure:
+Estimating causal effects from high-dimensional, network-structured exposures
+is a core challenge in neuroscience, genomics, and environmental science.
+Standard penalized regression recovers associations, not causal effects: when
+unmeasured confounders jointly influence both the exposures and the outcome,
+ordinary regression coefficients are biased. Instrumental variables (IVs)
+break this bias by exploiting external perturbations — such as genetic
+variants in brain-imaging studies — that shift exposures without directly
+affecting the outcome.
 
-| Estimator  | Graph penalty | Invalid-IV correction |
-|------------|:------------:|:---------------------:|
-| `iv_lasso` | No           | No                    |
-| `ivgl`     | Yes          | No                    |
-| `ivgl_s`   | Yes          | Yes                   |
+The **ivgls** package combines IV identification with graph-structured
+regularization. When the exposures are nodes in a known network (e.g., brain
+regions linked by white-matter tracts, genes linked by a pathway graph),
+borrowing strength across connected nodes improves support recovery. In
+high-dimensional genetic applications, some candidate instruments may violate
+the exclusion restriction through horizontal pleiotropy; **ivgls** corrects
+for this via a sisVIVE-style alternating update.
+
+The package provides three estimators:
+
+| Estimator   | Graph penalty | Invalid-IV correction | Requires `glmgraph` |
+|-------------|:------------:|:---------------------:|:-------------------:|
+| `iv_lasso`  | No           | No                    | No                  |
+| `ivgl`      | Yes          | No                    | Yes                 |
+| `ivgl_s`    | Yes          | Yes                   | Yes                 |
+
+`iv_lasso` is a pure-`glmnet` two-stage LASSO baseline. `ivgl` adds a
+graph-Laplacian penalty in the second stage via `glmgraph`. `ivgl_s` further
+estimates and removes direct instrument-to-outcome effects.
 
 ## Installation
 
-```{r, eval=FALSE}
-# glmgraph must be installed first (not on CRAN)
+```{r install, eval=FALSE}
+# Step 1: install glmgraph (not on CRAN; required for ivgl and ivgl_s)
 devtools::install_github("cran/glmgraph")
 
-# then install ivgls
+# Step 2: install ivgls
 install.packages("ivgls")
 ```
 
-## Quick Start
+`iv_lasso()` and all graph construction, simulation, and evaluation utilities
+work without `glmgraph`. Calling `ivgl()` or `ivgl_s()` without it installed
+produces an informative error with the install command above.
 
-### 1. Build a graph and Laplacian
+## Graph construction
 
-```{r}
+```{r graphs}
 library(ivgls)
 
-A <- make_graph(p = 20, type = "chain")
+A <- make_graph(p = 30, type = "chain")
 L <- get_laplacian(A)
+
+cat("Number of edges:", sum(A) / 2, "\n")
 ```
 
-### 2. Simulate data
+## Generating a causal coefficient vector
 
-```{r}
+`generate_beta()` places $s_0$ active nodes on the graph according to one
+of three signal patterns. The **smooth** pattern places active nodes in a
+spatially contiguous cluster with similarly-signed effects.
+
+```{r beta}
+set.seed(1)
+
 bobj <- generate_beta(A, s2 = 4, signal = 2, pattern = "smooth")
-dat  <- generate_data(n = 120, p = 20, q = 60,
-                      s_alpha = 5, alpha_strength = 3,
-                      beta_true = bobj$beta_true)
+
+cat("Active nodes:", sort(bobj$active_set), "\n")
+cat("True effects at active nodes:\n")
+print(round(bobj$beta_true[bobj$active_set], 3))
 ```
 
-### 3. Fit the estimators
+## Simulating data
 
-```{r, eval=FALSE}
-beta_ivl  <- iv_lasso(dat$Y, dat$X, dat$Z)
-beta_ivgl <- ivgl(dat$Y, dat$X, dat$Z, L)
-fit_s     <- ivgl_s(dat$Y, dat$X, dat$Z, L, max_iter = 10)
-```
+`generate_data()` draws instruments $Z \in \mathbb{R}^{n \times q}$,
+constructs exposures with latent confounding, and introduces `s_alpha`
+invalid instruments whose direct effects on $Y$ violate the exclusion
+restriction.
 
-### 4. Evaluate recovery
-
-```{r, eval=FALSE}
-get_mcc(bobj$active_set, which(abs(beta_ivl)  > 1e-4), p = 20)
-get_mcc(bobj$active_set, which(abs(beta_ivgl) > 1e-4), p = 20)
-get_mcc(bobj$active_set, which(abs(fit_s$beta)> 1e-4), p = 20)
-```
-
-## Running a Simulation Study
-
-```{r, eval=FALSE}
-res <- run_simulation(
-  B              = 50,
+```{r data}
+dat <- generate_data(
   n              = 100,
-  p              = 20,
-  q              = 60,
-  graph_type     = "chain",
-  signal_pattern = "smooth",
-  s2             = 4,
-  signal         = 2,
+  p              = 30,
+  q              = 100,
   s_alpha        = 5,
-  alpha_strength = 3
+  alpha_strength = 3,
+  beta_true      = bobj$beta_true
 )
 
-aggregate(cbind(MCC, MSE) ~ Method, data = res, FUN = mean)
+cat("Y:", length(dat$Y),
+    "| X:", nrow(dat$X), "x", ncol(dat$X),
+    "| Z:", nrow(dat$Z), "x", ncol(dat$Z), "\n")
+cat("Invalid instrument indices:", which(dat$alpha_true != 0), "\n")
 ```
 
-## Invalid Instrument Detection
+## Fitting the estimators
 
-When instruments violate the exclusion restriction, `ivgl_s()` identifies
-them via the `alpha` component — non-zero entries are invalid instruments.
+### IV-LASSO
 
-```{r, eval=FALSE}
-fit <- ivgl_s(dat$Y, dat$X, dat$Z, L)
-which(abs(fit$alpha) > 1e-4)  # detected invalid instruments
+```{r ivlasso}
+beta_ivl <- iv_lasso(dat$Y, dat$X, dat$Z)
+
+cat("IV-LASSO selected nodes:", which(abs(beta_ivl) > 1e-4), "\n")
+cat("IV-LASSO MCC:",
+    round(get_mcc(bobj$active_set, which(abs(beta_ivl) > 1e-4), p = 30), 3), "\n")
 ```
+
+### IVGL and IVGL-S
+
+`ivgl()` and `ivgl_s()` require the `glmgraph` package. Install it with:
+`devtools::install_github("cran/glmgraph")`.
+
+```{r glmgraph-estimators}
+if (requireNamespace("glmgraph", quietly = TRUE)) {
+
+  beta_ivgl <- ivgl(dat$Y, dat$X, dat$Z, L)
+  fit_s     <- ivgl_s(dat$Y, dat$X, dat$Z, L, max_iter = 10)
+
+  cat("IVGL selected nodes:", which(abs(beta_ivgl) > 1e-4), "\n")
+  cat("IVGL-S selected nodes:", which(abs(fit_s$beta) > 1e-4), "\n")
+
+  cat("IVGL MCC:",
+      round(get_mcc(bobj$active_set, which(abs(beta_ivgl) > 1e-4), p = 30), 3), "\n")
+  cat("IVGL-S MCC:",
+      round(get_mcc(bobj$active_set, which(abs(fit_s$beta) > 1e-4), p = 30), 3), "\n")
+
+  cat("Detected invalid instruments:", which(abs(fit_s$alpha) > 1e-4), "\n")
+
+} else {
+  message(
+    "Package 'glmgraph' is not installed. ",
+    "ivgl() and ivgl_s() are unavailable.\n",
+    "Install with: devtools::install_github(\"cran/glmgraph\")"
+  )
+}
+```
+
+## Performance evaluation
+
+`eval_support()` returns MCC, TPR, FPR, and number of selected variables.
+
+```{r eval}
+supp_ivl <- which(abs(beta_ivl) > 1e-4)
+metrics  <- eval_support(bobj$active_set, supp_ivl, p = 30)
+print(round(metrics, 3))
+```
+
+## Graph misspecification
+
+`corrupt_graph()` randomly swaps a fraction of edges, useful for sensitivity
+analysis when the graph is estimated rather than known exactly.
+
+```{r corrupt}
+set.seed(2)
+A_corrupted <- corrupt_graph(A, corruption_rate = 0.20)
+
+cat("Original edges:", sum(A) / 2, "\n")
+cat("Corrupted edges:", sum(A_corrupted) / 2, "\n")
+```
+
+## Simulation study
+
+`run_simulation()` runs $B$ independent replicates and returns a long
+data frame with one row per method per replicate.
+
+```{r simulation}
+if (requireNamespace("glmgraph", quietly = TRUE)) {
+
+  res <- run_simulation(
+    B              = 5,
+    n              = 100,
+    p              = 30,
+    q              = 100,
+    graph_type     = "chain",
+    signal_pattern = "smooth",
+    s2             = 4,
+    signal         = 2,
+    s_alpha        = 5,
+    alpha_strength = 3
+  )
+
+  aggregate(cbind(MCC, MSE, TPR, FPR) ~ Method, data = res, FUN = mean)
+
+} else {
+  message(
+    "Package 'glmgraph' is not installed. ",
+    "run_simulation() is unavailable.\n",
+    "Install with: devtools::install_github(\"cran/glmgraph\")"
+  )
+}
+```
+
+## Application context
+
+The methods in this package were developed for neuroimaging-genetics studies
+using data from the Alzheimer's Disease Neuroimaging Initiative (ADNI).
+Brain region volumes from T1-weighted MRI serve as the network-structured
+exposures; SNPs from genome-wide genotyping serve as candidate instruments;
+and MMSE score serves as the cognitive outcome. The DKT atlas defines a
+graph over 62 cortical and subcortical regions of interest. In that setting,
+`ivgl_s()` identifies a conservative set of eight causal ROIs robust to
+pleiotropic SNP effects, while `iv_lasso()` and `ivgl()` select broader
+sets that include confounded associations. See the companion paper for full
+details.
